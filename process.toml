@@ -1,0 +1,86 @@
+# procd configuration
+# Alle Pfade so, wie sie im Container gesehen werden. Relative Pfade werden
+# relativ zum Verzeichnis dieser Datei aufgelöst.
+
+[core]
+# Unix-Domain-Socket der API. Default: "/run/procd.sock"
+sock = "/run/procd.sock"
+
+# Dateiberechtigungen des Sockets (Oktalliteral). Default: 0o660
+# Die Gruppe muss zu dem Prozess passen, der sich verbinden soll.
+socket_perm = 0o660
+
+# Wartezeit nach SIGTERM, bevor auf SIGKILL eskaliert wird. Default: "10s"
+# Muss kleiner sein als der Stop-Timeout von Docker (siehe README).
+shutdown_timeout = "10s"
+
+# Sampling-Intervall der RAM/CPU-Metriken. Default: "2s"
+metrics_interval = "2s"
+
+# Optional: .env-Datei (KEY=VALUE pro Zeile), deren Variablen ALLE Prozesse
+# erhalten. Das env-Feld eines Prozesses überschreibt gleichnamige Keys.
+# envfile = ".env"
+
+# Optional: gemeinsames Crash-Log, eine Zeile pro Absturz über alle Prozesse.
+# logfile = "/var/log/procd/crashes.log"
+
+# Optional: Kommando, das bei jedem Absturz läuft (nicht bei Exit-Code 0 und
+# nicht bei einem Stop). Details kommen über PROCD_*-Umgebungsvariablen an
+# (PROCD_KEY, PROCD_EVENT, PROCD_EXIT_CODE, ... siehe README). Ein Prozess kann
+# das mit einem eigenen failed_hook überschreiben.
+# failed_hook = "/usr/local/bin/notify-crash.sh"
+
+# Maximale Laufzeit eines Hooks, danach SIGKILL. Default: "30s"
+# failed_hook_timeout = "30s"
+
+[[process]]
+key = "web"
+cmd = "exec /usr/local/bin/web-server --port 8080"
+# Optional: Arbeitsverzeichnis. Default: cwd von procd.
+# workdir = "/app"
+# Optional: zusätzliche Umgebungsvariablen.
+# env = ["APP_ENV=production"]
+
+# Verhindert das Stoppen über die API (Start bleibt erlaubt). Default: false
+readonly = true
+# Beim Hochfahren von procd starten. Default: true
+autostart = true
+# Ausgabe mit Zeitstempel + Key auf die Konsole von procd spiegeln. Default: true
+stdout = true
+# Optional: Ausgabe zusätzlich roh in diese Datei schreiben.
+# logfile = "/var/log/procd/web.log"
+
+[[process]]
+key = "worker"
+cmd = "exec /usr/local/bin/worker"
+autostart = true
+stdout = true
+
+# Neustart bei Absturz (Exit-Code != 0 oder Signal), nicht bei Exit-Code 0
+# oder einem Stop. Default: false
+restart = true
+# Wartezeit vor jedem Neustart. Default: "1s"
+restart_delay = "2s"
+# Zeitfenster für das Neustart-Limit. Default: "60s"
+restart_window = "60s"
+# Nach so vielen Neustarts innerhalb von restart_window aufgeben (Zustand
+# "failed"). 0 = unbegrenzt. Default: 5
+restart_max_retries = 5
+
+# Optional: eigener Hook nur für diesen Prozess; "" schaltet ihn ab.
+# failed_hook = "/usr/local/bin/notify-worker-crash.sh"
+
+# Optional: Zeitplan als Cron-Ausdruck (Minute Stunde Tag Monat Wochentag),
+# alternativ @hourly, @daily, @weekly, @monthly, @yearly oder "@every 30m".
+# Zeiten in der lokalen Zeitzone des Containers (TZ).
+# schedule = "0 4 * * *"
+# Was zum Zeitpunkt passiert: "start" (starten, falls nicht laufend) oder
+# "restart" (stoppen und neu starten). Default: "start"
+# schedule_action = "restart"
+
+[[process]]
+key = "cleanup"
+cmd = "exec /usr/local/bin/cleanup"
+# Cron-Job: nicht beim Hochfahren starten, sondern täglich um 02:30.
+autostart = false
+schedule = "30 2 * * *"
