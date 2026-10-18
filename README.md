@@ -1,35 +1,37 @@
 # procd
 
-`procd` ist ein schlanker Prozess-Supervisor für Docker-Container, in denen
-mehr als ein langlaufender Prozess laufen soll, z.B. ein Webserver und ein
-Worker. procd läuft als Entrypoint des Containers, startet die in
-`process.toml` definierten Prozesse und kümmert sich um sie:
+**English** | [Deutsch](README.de.md)
 
-- **Lebenszyklus:** Start beim Hochfahren, geordneter Stop bei `docker stop`
-  (SIGTERM an jede Prozessgruppe, SIGKILL nach Timeout)
-- **Neustart bei Absturz** mit Verzögerung und Burst-Limit, ähnlich `Restart=on-failure` bei systemd
-- **Logs:** Die Ausgabe aller Prozesse erscheint mit Zeitstempel und Prozess-Key
-  in `docker logs`, optional zusätzlich in einer Datei pro Prozess
-- **Zeitplan:** Prozesse per Cron-Ausdruck automatisch starten (Cron-Jobs)
-  oder regelmäßig neu starten
-- **Crash-Hook:** ein beliebiges Kommando pro Absturz, z.B. für Benachrichtigungen
-- **Status:** Zustand, PID, Laufzeit, RAM und CPU pro Prozess
-- **Steuerung:** per CLI (`docker exec … procd ls`) oder über eine JSON-API auf
-  einem Unix-Socket, die auch andere Prozesse oder Container nutzen können
+`procd` is a lightweight process supervisor for Docker containers that need
+to run more than one long-running process, e.g. a web server and a worker.
+procd runs as the container's entrypoint, starts the processes defined in
+`process.toml` and looks after them:
 
-Ein einziges statisches Binary (~2 MB), keine Laufzeitabhängigkeiten.
+- **Lifecycle:** start on boot, orderly stop on `docker stop`
+  (SIGTERM to each process group, SIGKILL after a timeout)
+- **Restart on crash** with a delay and a burst limit, similar to systemd's `Restart=on-failure`
+- **Logs:** the output of all processes shows up in `docker logs` with a
+  timestamp and the process key, optionally also in a file per process
+- **Schedules:** start processes automatically via cron expressions (cron
+  jobs) or restart them periodically
+- **Crash hook:** an arbitrary command per crash, e.g. for notifications
+- **Status:** state, PID, uptime, memory and CPU per process
+- **Control:** via the CLI (`docker exec … procd ls`) or a JSON API on a Unix
+  socket that other processes or containers can use as well
+
+A single static binary (~2 MB), no runtime dependencies.
 
 ## Installation
 
-`install.sh` lädt das statische Binary für die passende Architektur
-(`x86_64` oder `aarch64`) aus den GitHub-Releases, prüft die SHA256-Summe und
-installiert es nach `/usr/local/bin/procd`. Es braucht nur `sh` und `curl`
-oder `wget`, läuft also auch mit busybox auf Alpine.
+`install.sh` downloads the static binary for the matching architecture
+(`x86_64` or `aarch64`) from the GitHub releases, verifies its SHA256 checksum
+and installs it to `/usr/local/bin/procd`. It only needs `sh` and `curl` or
+`wget`, so it also works with busybox on Alpine.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh | sh
 
-# bestimmte Version, anderes Verzeichnis
+# specific version, different directory
 curl -fsSL https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh \
     | sh -s -- --version v0.2.0 --dir ~/.local/bin
 ```
@@ -37,27 +39,27 @@ curl -fsSL https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/ins
 | Option | Env | Default |
 |---|---|---|
 | `-v`, `--version <tag>` | `PROCD_VERSION` | `latest` |
-| `-d`, `--dir <pfad>` | `PROCD_INSTALL_DIR` | `/usr/local/bin` |
+| `-d`, `--dir <path>` | `PROCD_INSTALL_DIR` | `/usr/local/bin` |
 | `-r`, `--repo <owner/repo>` | `PROCD_REPO` | `bli-blu-bla/process-deamon` |
-| | `PROCD_BASE_URL` | `https://github.com/<repo>/releases` (für Mirror) |
+| | `PROCD_BASE_URL` | `https://github.com/<repo>/releases` (for mirrors) |
 
-Ist das Zielverzeichnis nicht beschreibbar, wird `sudo` verwendet. Im
-Dockerfile ersetzt das die Build-Stage:
+If the target directory isn't writable, `sudo` is used. In a Dockerfile this
+replaces the build stage:
 
 ```dockerfile
 FROM alpine:3
 RUN wget -qO- https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh | sh -s -- --version v0.2.0
 ```
 
-Releases entstehen automatisch beim Pushen eines Tags `v*` (siehe
+Releases are created automatically when a `v*` tag is pushed (see
 `.github/workflows/build.yml`).
 
 ## Docker
 
-### Einbinden ins Image
+### Adding it to an image
 
-procd wird in einer eigenen Build-Stage gebaut und als Binary ins
-Anwendungs-Image kopiert:
+procd is built in its own build stage and copied into the application image
+as a binary:
 
 ```dockerfile
 FROM rust:1-alpine AS procd
@@ -75,10 +77,10 @@ HEALTHCHECK --interval=30s --timeout=3s CMD ["procd", "ls"]
 ENTRYPOINT ["procd"]
 ```
 
-Das musl-Binary ist statisch gelinkt und läuft damit auch in Images, die nicht
-auf Alpine basieren (Debian, distroless, `scratch` mit `/bin/sh`).
+The musl binary is statically linked, so it also runs in images that aren't
+based on Alpine (Debian, distroless, `scratch` with `/bin/sh`).
 
-### Starten
+### Running
 
 ```bash
 docker run -d --init --name app my-image
@@ -93,11 +95,11 @@ services:
     stop_grace_period: 30s
 ```
 
-### Bedienen
+### Operating
 
 ```bash
-docker logs -f app                     # Ausgabe aller Prozesse
-docker exec app procd ls               # Übersicht
+docker logs -f app                     # output of all processes
+docker exec app procd ls               # overview
 docker exec app procd status worker
 docker exec app procd stop worker
 docker exec app procd start -a
@@ -109,127 +111,124 @@ web (ro)  running  7    3h12m   48.2 MiB 1.3%  -
 worker    crashed  -    -       -        -     code 1
 ```
 
-### Hinweise für den Container-Betrieb
+### Notes for running in containers
 
-- **Stop-Timeout:** `docker stop` wartet standardmäßig 10s und schickt dann
-  SIGKILL an den ganzen Container. procd braucht im schlimmsten Fall
-  `shutdown_timeout` (Default 10s) plus die Restlaufzeit gerade laufender
-  Hooks (`failed_hook_timeout`). Deshalb `stop_grace_period` bzw.
-  `docker stop -t` großzügiger setzen als `shutdown_timeout` oder
-  `shutdown_timeout` verkleinern.
-- **PID 1 / `--init`:** procd räumt seine eigenen Kindprozesse ab, aber keine
-  fremden verwaisten Prozesse, die der Kernel an PID 1 weiterreicht (z.B.
-  Enkel eines abgestürzten Prozesses). Mit `--init` (compose: `init: true`)
-  übernimmt das ein minimaler Init-Prozess (tini). Signale reicht er an procd weiter.
-- **Healthcheck:** `procd ls` liefert Exit-Code ≠ 0, wenn procd nicht antwortet.
-- **Socket teilen:** Liegt `core.sock` in einem Volume, können andere
-  Container die API nutzen. `socket_perm` und die Gruppe der Socket-Datei
-  müssen zum zugreifenden Benutzer passen.
-- **Read-only-Modus:** Mit `procd --readonly` kann die API Prozesse nur noch
-  anzeigen, aber weder starten noch stoppen. Sinnvoll, wenn der Socket nach
-  außen geteilt wird.
+- **Stop timeout:** `docker stop` waits 10s by default and then sends SIGKILL
+  to the whole container. In the worst case procd needs `shutdown_timeout`
+  (default 10s) plus the remaining runtime of hooks that are still running
+  (`failed_hook_timeout`). So set `stop_grace_period` or `docker stop -t`
+  higher than `shutdown_timeout`, or lower `shutdown_timeout`.
+- **PID 1 / `--init`:** procd reaps its own children, but not unrelated
+  orphaned processes that the kernel hands to PID 1 (e.g. grandchildren of a
+  crashed process). With `--init` (compose: `init: true`) a minimal init
+  process (tini) takes care of that. It forwards signals to procd.
+- **Healthcheck:** `procd ls` exits with a non-zero code if procd doesn't respond.
+- **Sharing the socket:** if `core.sock` lives in a volume, other containers
+  can use the API. `socket_perm` and the socket file's group must match the
+  accessing user.
+- **Read-only mode:** with `procd --readonly` the API can only list
+  processes, not start or stop them. Useful when the socket is shared with
+  other containers.
 
 ## CLI
 
-Ohne Subcommand läuft procd als Supervisor (identisch zu `procd run`). Die
-übrigen Subcommands sind ein Client, der über den Socket mit einer laufenden
-Instanz spricht.
+Without a subcommand, procd runs as the supervisor (same as `procd run`). The
+other subcommands are a client that talks to a running instance over the
+socket.
 
 ```bash
-procd                               # Supervisor mit ./process.toml
-procd -c /etc/procd/process.toml    # andere Config
-procd run --config process.toml -r  # Supervisor, API nur lesend
+procd                               # supervisor with ./process.toml
+procd -c /etc/procd/process.toml    # different config
+procd run --config process.toml -r  # supervisor, read-only API
 
-procd ls                            # Tabelle aller Prozesse (alias: list)
-procd ls --json                     # dasselbe als JSON
-procd status worker                 # Details eines Prozesses
-procd start worker                  # einzelne Prozesse starten …
-procd stop worker other             # … oder stoppen
-procd start -a                      # alle nicht laufenden starten
-procd stop --all                    # alle laufenden stoppen (readonly-Prozesse ausgenommen)
-procd check -c process.toml         # Config prüfen und beenden, z.B. im Image-Build
+procd ls                            # table of all processes (alias: list)
+procd ls --json                     # the same as JSON
+procd status worker                 # details of one process
+procd start worker                  # start individual processes …
+procd stop worker other             # … or stop them
+procd start -a                      # start all that aren't running
+procd stop --all                    # stop all running ones (except readonly processes)
+procd check -c process.toml         # validate the config and exit, e.g. during the image build
 ```
 
-### Supervisor-Optionen
+### Supervisor options
 
-| Kurz | Lang | Env | Default | Beschreibung |
+| Short | Long | Env | Default | Description |
 |---|---|---|---|---|
-| `-c` | `--config <PFAD>` | `PROCD_CONFIG` | `process.toml` | Pfad zur Konfigurationsdatei |
-| `-r` | `--readonly` | | aus | Lehnt `process.start`/`process.stop` über den Socket ab, unabhängig von der Config. Anzeigen bleibt erlaubt. |
-| `-h` | `--help` | | | Hilfe (`--help` ausführlich) |
+| `-c` | `--config <PATH>` | `PROCD_CONFIG` | `process.toml` | Path to the config file |
+| `-r` | `--readonly` | | off | Rejects `process.start`/`process.stop` over the socket, regardless of the config. Listing is still allowed. |
+| `-h` | `--help` | | | Help (`--help` for details) |
 | `-V` | `--version` | | | Version |
 
-### Client-Optionen
+### Client options
 
-| Kurz | Lang | Env | Beschreibung |
+| Short | Long | Env | Description |
 |---|---|---|---|
-| `-s` | `--socket <PFAD>` | `PROCD_SOCKET` | Socket der laufenden Instanz. Default: `core.sock` aus der Config (`-c`), sonst `/run/procd.sock` |
-| `-c` | `--config <PFAD>` | `PROCD_CONFIG` | Config, aus der `core.sock` gelesen wird (nur dieses Feld; fehlt die Datei, gilt der Default) |
-| `-a` | `--all` | | `start`/`stop`: alle Prozesse statt einzelner Keys |
-| `-j` | `--json` | | `list`/`status`: JSON statt Tabelle |
+| `-s` | `--socket <PATH>` | `PROCD_SOCKET` | Socket of the running instance. Default: `core.sock` from the config (`-c`), otherwise `/run/procd.sock` |
+| `-c` | `--config <PATH>` | `PROCD_CONFIG` | Config to read `core.sock` from (only that field; if the file is missing, the default applies) |
+| `-a` | `--all` | | `start`/`stop`: all processes instead of individual keys |
+| `-j` | `--json` | | `list`/`status`: JSON instead of a table |
 
-`start`/`stop` liefern Exit-Code `1`, wenn mindestens ein Prozess fehlschlägt.
-Ein Prozess, der schon im Zielzustand ist, gilt nicht als Fehler, sondern wird
-als `skip` gemeldet. Farben gibt es nur auf einem Terminal; mit `NO_COLOR=1`
-sind sie aus.
+`start`/`stop` exit with code `1` if at least one process fails. A process
+that is already in the target state doesn't count as an error and is reported
+as `skip`. Colors are only used on a terminal; `NO_COLOR=1` turns them off.
 
-## Konfiguration: `process.toml`
+## Configuration: `process.toml`
 
-Unbekannte Felder führen beim Start zu einem Fehler (Schutz vor Tippfehlern).
-Dauern werden als Strings angegeben: `"500ms"`, `"10s"`, `"1m30s"`, `"1h"`.
-Relative Pfade werden relativ zum Verzeichnis der `process.toml` aufgelöst,
-nicht relativ zum aktuellen Arbeitsverzeichnis. Ein kommentiertes Beispiel
-liegt in [`process.toml`](process.toml).
+Unknown fields are an error at startup (protection against typos). Durations
+are given as strings: `"500ms"`, `"10s"`, `"1m30s"`, `"1h"`. Relative paths are
+resolved against the directory of `process.toml`, not the current working
+directory. A commented example is in [`process.toml`](process.toml).
 
 ### `[core]`
 
-| Feld | Typ | Default | Beschreibung |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `sock` | string | `/run/procd.sock` | Pfad des Unix-Sockets der API. Eine verwaiste Socket-Datei eines abgestürzten Laufs wird beim Start entfernt. Lauscht dort noch eine aktive Instanz, bricht der Start ab, bevor Prozesse gestartet werden. |
-| `socket_perm` | Oktalliteral | `0o660` | Dateiberechtigungen des Sockets |
-| `shutdown_timeout` | Dauer | `10s` | Wartezeit nach SIGTERM an einen Prozess, bevor SIGKILL folgt. Gilt für `stop` und für das Herunterfahren von procd. |
-| `metrics_interval` | Dauer | `2s` | Sampling-Intervall für RAM/CPU |
-| `envfile` | string | – | `.env`-Datei (`KEY=VALUE` pro Zeile, `#`-Kommentare, optionale Anführungszeichen), deren Variablen **alle** Prozesse und Hooks erhalten. Fehlt die Datei oder ist eine Zeile ungültig, bricht der Start ab. |
-| `logfile` | string | – | Gemeinsames Crash-Log: eine Zeile pro Absturz über alle Prozesse, mit Zeitstempel, Key, Exit-Code, Signal und `cmd` |
-| `failed_hook` | string | – | Kommando, das bei jedem Absturz läuft (siehe [Crash-Hook](#crash-hook)) |
-| `failed_hook_timeout` | Dauer | `30s` | Maximale Laufzeit eines Hooks; danach wird seine Prozessgruppe per SIGKILL beendet |
+| `sock` | string | `/run/procd.sock` | Path of the API's Unix socket. A stale socket file left by a crashed run is removed at startup. If an active instance is still listening there, startup aborts before any process is started. |
+| `socket_perm` | octal literal | `0o660` | File permissions of the socket |
+| `shutdown_timeout` | duration | `10s` | How long to wait after sending SIGTERM to a process before SIGKILL follows. Applies to `stop` and to procd shutting down. |
+| `metrics_interval` | duration | `2s` | Sampling interval for memory/CPU |
+| `envfile` | string | – | `.env` file (`KEY=VALUE` per line, `#` comments, optional quotes) whose variables are passed to **all** processes and hooks. If the file is missing or a line is invalid, startup aborts. |
+| `logfile` | string | – | Shared crash log: one line per crash across all processes, with timestamp, key, exit code, signal and `cmd` |
+| `failed_hook` | string | – | Command run on every crash (see [Crash hook](#crash-hook)) |
+| `failed_hook_timeout` | duration | `30s` | Maximum runtime of a hook; after that its process group is killed with SIGKILL |
 
 ### `[[process]]`
 
-Ein Block pro Prozess, beliebig viele.
+One block per process, as many as needed.
 
-| Feld | Typ | Default | Beschreibung |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `key` | string | *erforderlich* | Eindeutiger Name, für CLI, API und Log-Prefix |
-| `cmd` | string | *erforderlich* | Wird als `sh -c "<cmd>"` in einer eigenen Prozessgruppe ausgeführt. Signale gehen an die ganze Gruppe. Mit `exec` (`cmd = "exec my-server --flag"`) ersetzt das Programm die Shell; dann beziehen sich PID und Metriken auf das Programm selbst. |
-| `workdir` | string | cwd von procd | Arbeitsverzeichnis |
-| `env` | string-Array | – | Zusätzliche Variablen (`"KEY=VALUE"`). Sie überschreiben die geerbte Umgebung und `core.envfile`. |
-| `readonly` | bool | `false` | Verhindert **nur das Stoppen** über CLI/API. Start bleibt erlaubt; beim Herunterfahren von procd wird der Prozess trotzdem gestoppt. |
-| `autostart` | bool | `true` | Beim Hochfahren starten |
-| `stdout` | bool | `true` | stdout/stderr mit Prefix auf die Konsole (→ `docker logs`) spiegeln |
-| `logfile` | string | – | stdout/stderr zusätzlich roh (ohne Prefix) in diese Datei schreiben. Unabhängig von `stdout`. |
-| `restart` | bool | `false` | Neustart bei **Absturz** (Exit-Code ≠ 0 oder Signal). Nicht bei Exit-Code 0 und nicht nach einem Stop. |
-| `restart_delay` | Dauer | `1s` | Wartezeit vor jedem Neustart |
-| `restart_window` | Dauer | `60s` | Zeitfenster für das Burst-Limit |
-| `restart_max_retries` | int | `5` | Maximale Neustarts innerhalb von `restart_window`; danach Zustand `failed` und kein weiterer Versuch. `0` = unbegrenzt. Ein manueller Start setzt den Zähler zurück. |
-| `failed_hook` | string | erbt `core.failed_hook` | Eigener Hook für diesen Prozess; `""` schaltet ihn ab |
-| `schedule` | string | – | Zeitplan als Cron-Ausdruck (siehe [Zeitplan](#zeitplan)) |
-| `schedule_action` | string | `"start"` | Was zum Zeitpunkt passiert: `"start"` oder `"restart"`. Nur zusammen mit `schedule` erlaubt. |
+| `key` | string | *required* | Unique name, used by the CLI, the API and as log prefix |
+| `cmd` | string | *required* | Run as `sh -c "<cmd>"` in its own process group. Signals go to the whole group. With `exec` (`cmd = "exec my-server --flag"`) the program replaces the shell; PID and metrics then refer to the program itself. |
+| `workdir` | string | procd's cwd | Working directory |
+| `env` | string array | – | Additional variables (`"KEY=VALUE"`). They override the inherited environment and `core.envfile`. |
+| `readonly` | bool | `false` | Prevents **only stopping** via CLI/API. Starting is still allowed; when procd shuts down, the process is stopped anyway. |
+| `autostart` | bool | `true` | Start on boot |
+| `stdout` | bool | `true` | Mirror stdout/stderr with a prefix to the console (→ `docker logs`) |
+| `logfile` | string | – | Also write stdout/stderr raw (without prefix) to this file. Independent of `stdout`. |
+| `restart` | bool | `false` | Restart on **crash** (non-zero exit code or signal). Not on exit code 0 and not after a stop. |
+| `restart_delay` | duration | `1s` | Delay before each restart |
+| `restart_window` | duration | `60s` | Time window for the burst limit |
+| `restart_max_retries` | int | `5` | Maximum number of restarts within `restart_window`; after that the state is `failed` and no further attempt is made. `0` = unlimited. A manual start resets the counter. |
+| `failed_hook` | string | inherits `core.failed_hook` | Own hook for this process; `""` disables it |
+| `schedule` | string | – | Schedule as a cron expression (see [Schedules](#schedules)) |
+| `schedule_action` | string | `"start"` | What happens when the schedule fires: `"start"` or `"restart"`. Only allowed together with `schedule`. |
 
-### Zustände
+### States
 
-| Zustand | Bedeutung |
+| State | Meaning |
 |---|---|
-| `stopped` | nicht gestartet oder per Stop beendet |
-| `running` | läuft |
-| `stopping` | SIGTERM gesendet, wartet auf Exit |
-| `exited` | selbst beendet mit Exit-Code 0 |
-| `crashed` | selbst beendet mit Exit-Code ≠ 0 oder durch Signal; ggf. ist ein Neustart geplant |
-| `failed` | Neustart-Limit erreicht, kein weiterer automatischer Versuch |
+| `stopped` | not started, or ended by a stop |
+| `running` | running |
+| `stopping` | SIGTERM sent, waiting for the exit |
+| `exited` | exited on its own with exit code 0 |
+| `crashed` | exited on its own with a non-zero exit code or by a signal; a restart may be scheduled |
+| `failed` | restart limit reached, no further automatic attempt |
 
-(`starting` existiert im Protokoll, ist aber praktisch nie sichtbar.)
+(`starting` exists in the protocol but is practically never visible.)
 
-### Konsolen-Ausgabe
+### Console output
 
 ```
 [2026-08-17 12:00:12][core] procd 0.1.0 starting (config=/etc/procd/process.toml, readonly=false)
@@ -239,120 +238,117 @@ Ein Block pro Prozess, beliebig viele.
 [2026-08-17 12:03:47][core] worker crashed, restarting in 2s (attempt 1/5 within 1m0s)
 ```
 
-## Zeitplan
+## Schedules
 
-Mit `schedule` startet procd einen Prozess zu festen Zeiten bzw. startet ihn
-neu. `schedule_action` legt fest, was passiert:
+With `schedule`, procd starts or restarts a process at fixed times.
+`schedule_action` defines what happens:
 
-- **`start`** (Default): Der Prozess wird gestartet, falls er nicht läuft.
-  Läuft er noch vom letzten Mal, wird der Termin übersprungen (keine
-  Überlappung). Das ist ein klassischer Cron-Job, meist mit `autostart = false`.
-- **`restart`**: Ein laufender Prozess wird gestoppt (SIGTERM, nach
-  `shutdown_timeout` SIGKILL) und danach neu gestartet. Läuft er nicht, wird
-  er einfach gestartet. Gedacht z.B. für einen nächtlichen Neustart eines
-  Dienstes, der Speicher verliert.
+- **`start`** (default): the process is started if it isn't running. If it is
+  still running from the previous run, the slot is skipped (no overlap). This
+  is a classic cron job, usually with `autostart = false`.
+- **`restart`**: a running process is stopped (SIGTERM, SIGKILL after
+  `shutdown_timeout`) and then started again. If it isn't running, it is
+  simply started. Meant e.g. for a nightly restart of a service that leaks
+  memory.
 
 ```toml
 [[process]]
 key = "cleanup"
 cmd = "exec /usr/local/bin/cleanup --older-than 7d"
 autostart = false
-schedule = "30 2 * * *"         # täglich 02:30
+schedule = "30 2 * * *"         # daily at 02:30
 
 [[process]]
 key = "web"
 cmd = "exec /usr/local/bin/web-server"
-schedule = "0 4 * * sun"        # sonntags 04:00 neu starten
+schedule = "0 4 * * sun"        # restart on Sundays at 04:00
 schedule_action = "restart"
 ```
 
 ### Syntax
 
-Fünf Felder wie bei klassischem cron: `Minute Stunde Tag Monat Wochentag`.
+Five fields as in classic cron: `minute hour day month weekday`.
 
-| Feld | Werte | Namen |
+| Field | Values | Names |
 |---|---|---|
-| Minute | 0-59 | |
-| Stunde | 0-23 | |
-| Tag | 1-31 | |
-| Monat | 1-12 | `jan`-`dec` |
-| Wochentag | 0-7 (0 und 7 = Sonntag) | `sun`-`sat` |
+| minute | 0-59 | |
+| hour | 0-23 | |
+| day | 1-31 | |
+| month | 1-12 | `jan`-`dec` |
+| weekday | 0-7 (0 and 7 = Sunday) | `sun`-`sat` |
 
-In jedem Feld sind `*`, einzelne Werte (`5`), Bereiche (`1-5`, `mon-fri`),
-Schritte (`*/15`, `10-50/10`) und Listen (`1,15,30`) möglich. Sind Tag *und*
-Wochentag eingeschränkt, reicht es, wenn einer von beiden passt (wie bei
-cron). Außerdem gibt es:
+Each field accepts `*`, single values (`5`), ranges (`1-5`, `mon-fri`), steps
+(`*/15`, `10-50/10`) and lists (`1,15,30`). If both day *and* weekday are
+restricted, it's enough for one of them to match (as in cron). In addition:
 
-| Ausdruck | Bedeutung |
+| Expression | Meaning |
 |---|---|
 | `@yearly`, `@annually` | `0 0 1 1 *` |
 | `@monthly` | `0 0 1 * *` |
 | `@weekly` | `0 0 * * 0` |
 | `@daily`, `@midnight` | `0 0 * * *` |
 | `@hourly` | `0 * * * *` |
-| `@every <Dauer>` | festes Intervall ab dem Start von procd, z.B. `@every 30m` (mind. `1s`) |
+| `@every <duration>` | fixed interval from procd's start, e.g. `@every 30m` (at least `1s`) |
 
-### Verhalten
+### Behavior
 
-- Die Zeiten gelten in der lokalen Zeitzone des Containers (`TZ` bzw.
-  `/etc/localtime`, ohne beides UTC). Bei der Umstellung auf Sommerzeit
-  fallen nicht existierende Zeiten aus; bei der Umstellung auf Winterzeit
-  wird eine doppelte Zeit nur einmal ausgeführt.
-- Termine, die verpasst wurden, während ein Neustart lief oder die Uhr
-  sprang, werden nicht nachgeholt.
-- Ein Zeitplan läuft unabhängig von `autostart`, `restart` und manuellem
-  Stop: Auch ein per CLI gestoppter Prozess wird zum nächsten Termin wieder
-  gestartet. Er läuft auch für `readonly`-Prozesse, weil er aus der Config
-  kommt und nicht über die API.
-- Ein geplanter Start gilt wie ein manueller Start: Ein Prozess in `failed`
-  bekommt eine neue Chance, der Neustart-Zähler wird zurückgesetzt.
-- `procd status <key>` zeigt den Zeitplan und den nächsten Termin. In der API
-  stehen dafür `schedule`, `schedule_action` und `next_run`.
+- Times are in the container's local time zone (`TZ` or `/etc/localtime`,
+  UTC if neither is set). When daylight saving time starts, times that don't
+  exist are skipped; when it ends, a repeated time runs only once.
+- Slots missed while a restart was running or the clock jumped are not made
+  up for.
+- A schedule runs independently of `autostart`, `restart` and manual stops:
+  a process stopped via the CLI is started again at the next slot. It also
+  runs for `readonly` processes, because it comes from the config and not
+  from the API.
+- A scheduled start counts as a manual start: a process in `failed` gets a
+  new chance, and the restart counter is reset.
+- `procd status <key>` shows the schedule and the next slot. In the API these
+  are `schedule`, `schedule_action` and `next_run`.
 
-## Crash-Hook
+## Crash hook
 
-Stürzt ein Prozess ab (Exit-Code ≠ 0 oder Signal, ohne dass ein Stop
-angefordert wurde), führt procd `failed_hook` aus. Exit-Code 0 und ein
-regulärer Stop lösen ihn nicht aus.
+When a process crashes (non-zero exit code or signal, without a stop having
+been requested), procd runs `failed_hook`. Exit code 0 and a regular stop
+don't trigger it.
 
-- **Ein Aufruf pro Absturz,** *nach* der Neustart-Entscheidung:
-  `PROCD_EVENT=crashed` (Neustart geplant oder `restart` aus) bzw.
-  `PROCD_EVENT=failed` (Neustart-Limit erreicht).
-- Ausführung über `sh -c` im `workdir` des Prozesses, in eigener
-  Prozessgruppe, mit dessen Umgebung (inkl. `envfile` und `env`) plus den
-  Variablen unten. Tokens für Benachrichtigungen können also aus dem
-  `envfile` kommen.
-- Läuft asynchron und blockiert weder den Neustart noch andere Prozesse.
-  Die Ausgabe erscheint mit `[hook]`-Prefix unter dem Key des Prozesses.
-- Beim Herunterfahren von procd starten keine neuen Hooks mehr. Laufende
-  dürfen bis `failed_hook_timeout` zu Ende laufen.
+- **One call per crash,** *after* the restart decision:
+  `PROCD_EVENT=crashed` (restart scheduled or `restart` off) or
+  `PROCD_EVENT=failed` (restart limit reached).
+- Runs via `sh -c` in the process's `workdir`, in its own process group,
+  with the process's environment (including `envfile` and `env`) plus the
+  variables below. So tokens for notifications can come from the `envfile`.
+- Runs asynchronously and blocks neither the restart nor other processes.
+  Its output appears with a `[hook]` prefix under the process's key.
+- Once procd is shutting down, no new hooks are started. Running ones may
+  finish, up to `failed_hook_timeout`.
 
-### Umgebungsvariablen
+### Environment variables
 
-Alle Variablen sind immer gesetzt (ggf. leer), damit Scripts sie auch unter
-`set -u` lesen können.
+All variables are always set (possibly empty), so scripts can read them
+under `set -u` too.
 
-| Variable | Beispiel | Beschreibung |
+| Variable | Example | Description |
 |---|---|---|
-| `PROCD_EVENT` | `crashed` | `crashed` oder `failed` |
-| `PROCD_KEY` | `worker` | Key des Prozesses |
-| `PROCD_CMD` | `exec /usr/local/bin/worker` | dessen `cmd` |
-| `PROCD_WORKDIR` | `/app` | dessen `workdir` (leer = cwd von procd) |
-| `PROCD_LOGFILE` | `/var/log/procd/worker.log` | dessen `logfile` (leer wenn keins) |
-| `PROCD_STATE` | `crashed` | `crashed` oder `failed` |
-| `PROCD_PID` | `4711` | PID des abgestürzten Laufs |
-| `PROCD_EXIT_CODE` | `3` | Exit-Code; `-1` bei Signal |
-| `PROCD_EXIT_SIGNAL` | `killed` | Signalname (`killed`, `terminated`, `segmentation fault`, …), leer bei normalem Exit |
-| `PROCD_STARTED_AT` | `2026-08-17T12:00:12+02:00` | Startzeit des Laufs (RFC 3339) |
-| `PROCD_EXITED_AT` | `2026-08-17T12:03:47+02:00` | Zeitpunkt des Absturzes (RFC 3339) |
-| `PROCD_UPTIME_SECONDS` | `215` | Laufzeit bis zum Absturz |
-| `PROCD_RESTART_ENABLED` | `true` | ob `restart` aktiv ist |
-| `PROCD_RESTART_SCHEDULED` | `true` | ob ein Neustart geplant wurde |
-| `PROCD_RESTART_DELAY_SECONDS` | `2` | Wartezeit bis dazu (`0` wenn keiner geplant) |
-| `PROCD_RESTART_COUNT` | `3` | Abstürze im aktuellen `restart_window` inkl. diesem |
-| `PROCD_RESTART_MAX_RETRIES` | `5` | `restart_max_retries` (`0` = unbegrenzt) |
+| `PROCD_EVENT` | `crashed` | `crashed` or `failed` |
+| `PROCD_KEY` | `worker` | the process's key |
+| `PROCD_CMD` | `exec /usr/local/bin/worker` | its `cmd` |
+| `PROCD_WORKDIR` | `/app` | its `workdir` (empty = procd's cwd) |
+| `PROCD_LOGFILE` | `/var/log/procd/worker.log` | its `logfile` (empty if none) |
+| `PROCD_STATE` | `crashed` | `crashed` or `failed` |
+| `PROCD_PID` | `4711` | PID of the crashed run |
+| `PROCD_EXIT_CODE` | `3` | exit code; `-1` for a signal |
+| `PROCD_EXIT_SIGNAL` | `killed` | signal name (`killed`, `terminated`, `segmentation fault`, …), empty on a normal exit |
+| `PROCD_STARTED_AT` | `2026-08-17T12:00:12+02:00` | start time of the run (RFC 3339) |
+| `PROCD_EXITED_AT` | `2026-08-17T12:03:47+02:00` | time of the crash (RFC 3339) |
+| `PROCD_UPTIME_SECONDS` | `215` | runtime until the crash |
+| `PROCD_RESTART_ENABLED` | `true` | whether `restart` is enabled |
+| `PROCD_RESTART_SCHEDULED` | `true` | whether a restart was scheduled |
+| `PROCD_RESTART_DELAY_SECONDS` | `2` | delay until then (`0` if none is scheduled) |
+| `PROCD_RESTART_COUNT` | `3` | crashes in the current `restart_window`, including this one |
+| `PROCD_RESTART_MAX_RETRIES` | `5` | `restart_max_retries` (`0` = unlimited) |
 
-### Beispiel
+### Example
 
 ```sh
 #!/bin/sh
@@ -372,11 +368,11 @@ curl -fsS -X POST "$NOTIFY_WEBHOOK" \
 
 ## API
 
-Die CLI ist ein Client dieser API. Andere Programme können den Socket direkt
-ansprechen. Das Protokoll ist kein HTTP, sondern an JSON-RPC 2.0 angelehnt:
-**eine JSON-Zeile pro Request** (mit `\n` abgeschlossen), eine JSON-Zeile pro
-Antwort. Über eine Verbindung können mehrere Requests nacheinander laufen. Nach
-60s ohne Request wird sie geschlossen.
+The CLI is a client of this API. Other programs can talk to the socket
+directly. The protocol is not HTTP but modeled after JSON-RPC 2.0: **one JSON
+line per request** (terminated by `\n`), one JSON line per response. Multiple
+requests can be sent one after another over a single connection. It is closed
+after 60s without a request.
 
 ```json
 → {"id": 1, "method": "process.start", "params": {"key": "worker"}}
@@ -388,76 +384,76 @@ Antwort. Über eine Verbindung können mehrere Requests nacheinander laufen. Nac
 printf '{"id":1,"method":"process.list"}\n' | nc -U /run/procd.sock -w 1
 ```
 
-### Methoden
+### Methods
 
-| Methode | Params | Ergebnis | Von `--readonly` blockiert |
+| Method | Params | Result | Blocked by `--readonly` |
 |---|---|---|---|
-| `process.list` | – | `{"processes": [ProcessInfo, ...]}` | nein |
-| `process.get` | `{"key": string}` | `{"process": ProcessInfo}` | nein |
-| `process.start` | `{"key": string}` | `{"process": ProcessInfo}` | ja |
-| `process.stop` | `{"key": string}` | `{"process": ProcessInfo}` | ja (und per-Prozess `readonly`) |
+| `process.list` | – | `{"processes": [ProcessInfo, ...]}` | no |
+| `process.get` | `{"key": string}` | `{"process": ProcessInfo}` | no |
+| `process.start` | `{"key": string}` | `{"process": ProcessInfo}` | yes |
+| `process.stop` | `{"key": string}` | `{"process": ProcessInfo}` | yes (and per-process `readonly`) |
 
 ### `ProcessInfo`
 
-| Feld | Beschreibung |
+| Field | Description |
 |---|---|
-| `key`, `cmd` | aus der Config |
-| `state` | siehe [Zustände](#zustände) |
-| `pid`, `started_at`, `uptime_seconds` | nur während der Prozess läuft |
-| `rss_bytes`, `cpu_percent` | aus `/proc` gesampelt, nur während der Prozess läuft; `cpu_percent` ist nicht pro Kern normalisiert (wie bei `top`) |
-| `readonly`, `autostart`, `stdout`, `logfile` | aus der Config |
-| `exit_code`, `exit_signal` | gesetzt, sobald der Prozess mindestens einmal beendet wurde |
-| `schedule`, `schedule_action` | aus der Config, nur bei Prozessen mit Zeitplan |
-| `next_run` | nächster geplanter Termin (RFC 3339) |
+| `key`, `cmd` | from the config |
+| `state` | see [States](#states) |
+| `pid`, `started_at`, `uptime_seconds` | only while the process is running |
+| `rss_bytes`, `cpu_percent` | sampled from `/proc`, only while the process is running; `cpu_percent` is not normalized per core (as in `top`) |
+| `readonly`, `autostart`, `stdout`, `logfile` | from the config |
+| `exit_code`, `exit_signal` | set once the process has exited at least once |
+| `schedule`, `schedule_action` | from the config, only for processes with a schedule |
+| `next_run` | next scheduled slot (RFC 3339) |
 
-Felder ohne Wert werden weggelassen.
+Fields without a value are omitted.
 
-### Fehlercodes
+### Error codes
 
-| Code | Bedeutung |
+| Code | Meaning |
 |---|---|
-| `-32700` | Zeile ist kein gültiges JSON |
-| `-32600` | `method` fehlt |
-| `-32601` | unbekannte Methode |
-| `-32602` | `params.key` fehlt oder ist leer |
-| `-32603` | interner Fehler (z.B. Start fehlgeschlagen) |
-| `-32001` | unbekannter `key` |
-| `-32002` | procd läuft mit `--readonly`, verändernde Methoden sind verboten |
-| `-32003` | Prozess hat `readonly = true` und kann nicht gestoppt werden |
-| `-32004` | bereits im Zielzustand (Start auf laufendem, Stop auf gestopptem Prozess) |
+| `-32700` | line is not valid JSON |
+| `-32600` | `method` is missing |
+| `-32601` | unknown method |
+| `-32602` | `params.key` is missing or empty |
+| `-32603` | internal error (e.g. start failed) |
+| `-32001` | unknown `key` |
+| `-32002` | procd runs with `--readonly`, modifying methods are forbidden |
+| `-32003` | process has `readonly = true` and can't be stopped |
+| `-32004` | already in the target state (start on a running, stop on a stopped process) |
 
 ## Build
 
 ```bash
 cargo build --release                                   # → target/release/procd
-cargo build --release --target x86_64-unknown-linux-musl  # statisch, für Container
+cargo build --release --target x86_64-unknown-linux-musl  # static, for containers
 cargo test
 ```
 
-## Einschränkungen
+## Limitations
 
-- Nur Linux: Metriken kommen aus `/proc`, Signale gehen an Prozessgruppen.
-- Neustart nur bei Absturz, nicht nach Exit-Code 0.
-- `shutdown_timeout` gilt global, nicht pro Prozess.
-- Prozesse starten parallel, ohne Reihenfolge oder Abhängigkeiten.
-- Zeitpläne mit Minuten-Auflösung; Sekunden-Felder (6 Felder) werden nicht unterstützt.
+- Linux only: metrics come from `/proc`, signals go to process groups.
+- Restart only on crash, not after exit code 0.
+- `shutdown_timeout` is global, not per process.
+- Processes start in parallel, without ordering or dependencies.
+- Schedules have minute resolution; seconds fields (6 fields) are not supported.
 
-## Umstieg von process-ctl
+## Migrating from process-ctl
 
-procd ist die Rust-Neufassung von `process-ctl`. Bestehende
-`process.toml`-Dateien funktionieren unverändert. Protokoll, Methoden,
-Felder und Fehlercodes der API sind gleich geblieben. Geändert hat sich:
+procd is the Rust rewrite of `process-ctl`. Existing `process.toml` files work
+unchanged. The API's protocol, methods, fields and error codes are the same.
+What changed:
 
-- **Aufruf:** `-config`/`-readonly` heißen jetzt `-c`/`--config` und
-  `-r`/`--readonly`. Der alte Aufruf bricht mit einer Fehlermeldung ab.
-- **Hook-Variablen:** `PROCESS_CTL_*` heißen jetzt `PROCD_*`.
-- **Default-Socket:** `/run/procd.sock` statt `/run/observer.sock`. Das
-  betrifft nur Configs ohne `core.sock`.
-- **Absturzerkennung:** Ein Absturz wird jetzt auch erkannt, wenn ein
-  Kindprozess die Ausgabe-Pipe offen hält. process-ctl blieb in diesem Fall
-  dauerhaft in `running`.
-- **Hook-Umgebung:** Der Hook erbt immer die vollständige Umgebung.
-  process-ctl übergab ohne `envfile`/`env` nur die Hook-Variablen, also auch
-  kein `PATH`.
-- Ein per-Prozess-`logfile` wird relativ zur `process.toml` aufgelöst, wie
-  alle anderen Pfade.
+- **Invocation:** `-config`/`-readonly` are now `-c`/`--config` and
+  `-r`/`--readonly`. The old invocation aborts with an error message.
+- **Hook variables:** `PROCESS_CTL_*` are now `PROCD_*`.
+- **Default socket:** `/run/procd.sock` instead of `/run/observer.sock`. This
+  only affects configs without `core.sock`.
+- **Crash detection:** a crash is now also detected when a child process
+  keeps the output pipe open. process-ctl stayed in `running` forever in that
+  case.
+- **Hook environment:** the hook always inherits the full environment.
+  process-ctl passed only the hook variables without `envfile`/`env`, so not
+  even `PATH`.
+- A per-process `logfile` is resolved relative to `process.toml`, like all
+  other paths.
