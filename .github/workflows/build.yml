@@ -35,26 +35,37 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --locked
 
-  # Static musl binary, as used in the Docker images (see README).
+  # Static musl binaries, as used in the Docker images (see README) and
+  # downloaded by install.sh. Pure Rust, so rust-lld can cross-link both
+  # targets without a C toolchain.
   build:
     needs: test
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    env:
+      TARGET: ${{ matrix.arch }}-unknown-linux-musl
+      ASSET: procd-${{ matrix.arch }}-linux-musl
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ env.TARGET }}
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - run: cargo build --locked --release --target x86_64-unknown-linux-musl
+        with:
+          key: ${{ env.TARGET }}
+      - run: cargo build --locked --release --target "$TARGET"
       - name: Package
         run: |
           mkdir dist
-          cp target/x86_64-unknown-linux-musl/release/procd dist/procd-x86_64-linux-musl
-          cd dist && sha256sum procd-x86_64-linux-musl > procd-x86_64-linux-musl.sha256
+          cp "target/$TARGET/release/procd" "dist/$ASSET"
+          cd dist && sha256sum "$ASSET" > "$ASSET.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: procd-x86_64-linux-musl
+          name: ${{ env.ASSET }}
           path: dist/
 
   # Tags like v0.2.0 publish the binary as a GitHub release.
@@ -65,11 +76,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: procd-x86_64-linux-musl
+          pattern: procd-*-linux-musl
           path: dist
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            install.sh
           generate_release_notes: true

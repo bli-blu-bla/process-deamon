@@ -19,6 +19,39 @@ Worker. procd läuft als Entrypoint des Containers, startet die in
 
 Ein einziges statisches Binary (~2 MB), keine Laufzeitabhängigkeiten.
 
+## Installation
+
+`install.sh` lädt das statische Binary für die passende Architektur
+(`x86_64` oder `aarch64`) aus den GitHub-Releases, prüft die SHA256-Summe und
+installiert es nach `/usr/local/bin/procd`. Es braucht nur `sh` und `curl`
+oder `wget`, läuft also auch mit busybox auf Alpine.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh | sh
+
+# bestimmte Version, anderes Verzeichnis
+curl -fsSL https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh \
+    | sh -s -- --version v0.2.0 --dir ~/.local/bin
+```
+
+| Option | Env | Default |
+|---|---|---|
+| `-v`, `--version <tag>` | `PROCD_VERSION` | `latest` |
+| `-d`, `--dir <pfad>` | `PROCD_INSTALL_DIR` | `/usr/local/bin` |
+| `-r`, `--repo <owner/repo>` | `PROCD_REPO` | `bli-blu-bla/process-deamon` |
+| | `PROCD_BASE_URL` | `https://github.com/<repo>/releases` (für Mirror) |
+
+Ist das Zielverzeichnis nicht beschreibbar, wird `sudo` verwendet. Im
+Dockerfile ersetzt das die Build-Stage:
+
+```dockerfile
+FROM alpine:3
+RUN wget -qO- https://raw.githubusercontent.com/bli-blu-bla/process-deamon/main/install.sh | sh -s -- --version v0.2.0
+```
+
+Releases entstehen automatisch beim Pushen eines Tags `v*` (siehe
+`.github/workflows/build.yml`).
+
 ## Docker
 
 ### Einbinden ins Image
