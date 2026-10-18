@@ -35,7 +35,8 @@ pub struct CoreConfig {
     pub shutdown_timeout: Duration,
     pub metrics_interval: Duration,
     pub envfile: Option<PathBuf>,
-    /// Parsed KEY=VALUE pairs from `envfile`, applied to every process.
+    /// `envfile` followed by `env` (later entries win), applied to every
+    /// process and hook.
     pub env_vars: Vec<(String, String)>,
     /// Shared crash log across all processes (one line per crash).
     pub logfile: Option<PathBuf>,
@@ -49,6 +50,8 @@ pub struct ProcessConfig {
     pub key: String,
     pub cmd: String,
     pub workdir: Option<PathBuf>,
+    /// The process's `envfile` followed by its `env` (later entries win);
+    /// applied on top of core.env_vars.
     pub env: Vec<(String, String)>,
     /// Protects only against process.stop over the API.
     pub readonly: bool,
@@ -93,6 +96,7 @@ struct RawCore {
     #[serde(default, deserialize_with = "de_duration")]
     metrics_interval: Option<Duration>,
     envfile: Option<PathBuf>,
+    env: Option<toml::Value>,
     logfile: Option<PathBuf>,
     failed_hook: Option<String>,
     #[serde(default, deserialize_with = "de_duration")]
@@ -107,8 +111,8 @@ struct RawProcess {
     #[serde(default)]
     cmd: String,
     workdir: Option<PathBuf>,
-    #[serde(default)]
-    env: Vec<String>,
+    envfile: Option<PathBuf>,
+    env: Option<toml::Value>,
     #[serde(default)]
     readonly: bool,
     autostart: Option<bool>,
@@ -150,10 +154,11 @@ pub fn load(path: &Path) -> Result<Config> {
     let resolve = |p: PathBuf| if p.is_absolute() { p } else { config_dir.join(p) };
 
     let envfile = non_empty(raw.core.envfile).map(resolve);
-    let env_vars = match &envfile {
+    let mut env_vars = match &envfile {
         Some(path) => parse_env_file(path).context("core.envfile")?,
         None => Vec::new(),
     };
+    env_vars.extend(env_table(raw.core.env).map_err(|e| anyhow!("{}: core.env: {e}", path.display()))?);
 
     let core = CoreConfig {
         sock: non_empty(raw.core.sock).unwrap_or_else(|| DEFAULT_SOCK.into()),
@@ -179,16 +184,12 @@ pub fn load(path: &Path) -> Result<Config> {
         if p.cmd.is_empty() {
             bail!("{}: process {:?}: cmd is required", path.display(), p.key);
         }
-        let env = p
-            .env
-            .iter()
-            .map(|entry| {
-                entry
-                    .split_once('=')
-                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                    .ok_or_else(|| anyhow!("{}: process {:?}: env entry {entry:?} is not KEY=VALUE", path.display(), p.key))
-            })
-            .collect::<Result<_>>()?;
+        let envfile = non_empty(p.envfile).map(resolve);
+        let mut env = match &envfile {
+            Some(file) => parse_env_file(file).with_context(|| format!("process {:?}: envfile", p.key))?,
+            None => Vec::new(),
+        };
+        env.extend(env_table(p.env).map_err(|e| anyhow!("{}: process {:?}: env: {e}", path.display(), p.key))?);
 
         let schedule = p
             .schedule
@@ -244,6 +245,38 @@ pub fn socket_from_file(path: &Path) -> Result<Option<PathBuf>> {
         .and_then(|sock| sock.as_str())
         .filter(|s| !s.is_empty())
         .map(PathBuf::from))
+}
+
+/// `env` as either an array of "KEY=VALUE" strings or a table
+/// (`env = { KEY = "value", PORT = 8080 }`). Table values may be strings,
+/// numbers or booleans; they are passed on as their TOML text.
+fn env_table(value: Option<toml::Value>) -> Result<Vec<(String, String)>, String> {
+    let pairs = match value {
+        None => return Ok(Vec::new()),
+        Some(toml::Value::Array(entries)) => entries
+            .into_iter()
+            .map(|entry| match entry {
+                toml::Value::String(s) => s
+                    .split_once('=')
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .ok_or_else(|| format!("entry {s:?} is not KEY=VALUE")),
+                other => Err(format!("entry {other} is not a \"KEY=VALUE\" string")),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(toml::Value::Table(table)) => table
+            .into_iter()
+            .map(|(k, v)| match v {
+                toml::Value::String(s) => Ok((k, s)),
+                v @ (toml::Value::Integer(_) | toml::Value::Float(_) | toml::Value::Boolean(_)) => Ok((k, v.to_string())),
+                other => Err(format!("{k}: value {other} must be a string, number or boolean")),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(other) => return Err(format!("expected an array of \"KEY=VALUE\" strings or a table, got {}", other.type_str())),
+    };
+    if let Some((k, _)) = pairs.iter().find(|(k, _)| k.is_empty() || k.contains(['=', '\0'])) {
+        return Err(format!("invalid variable name {k:?}"));
+    }
+    Ok(pairs)
 }
 
 /// Minimal dotenv: one KEY=VALUE per line, blank lines and `#` comments are
@@ -345,6 +378,48 @@ mod tests {
         assert!(load(&write(dir.path(), "d.toml", dup)).is_err());
         let bad = "[core]\nshutdown_timeout = \"10\"\n";
         assert!(load(&write(dir.path(), "b.toml", bad)).is_err());
+    }
+
+    #[test]
+    fn merges_env_sources_in_precedence_order() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "global.env", "A=file\nB=file\n");
+        write(dir.path(), "worker.env", "B=proc-file\nC=proc-file\n");
+        let cfg = load(&write(
+            dir.path(),
+            "process.toml",
+            r#"
+            [core]
+            envfile = "global.env"
+            env = { B = "core", PORT = 8080, DEBUG = true }
+
+            [[process]]
+            key = "w"
+            cmd = "x"
+            envfile = "worker.env"
+            env = ["C=proc"]
+            "#,
+        ))
+        .unwrap();
+
+        let pairs = |v: &[(String, String)]| v.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>();
+        assert_eq!(pairs(&cfg.core.env_vars), ["A=file", "B=file", "B=core", "DEBUG=true", "PORT=8080"]);
+        let p = &cfg.processes[0];
+        assert_eq!(pairs(&p.env), ["B=proc-file", "C=proc-file", "C=proc"]);
+    }
+
+    #[test]
+    fn rejects_bad_env() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in [
+            ("list.toml", "[core]\nenv = [\"NOEQUALS\"]\n"),
+            ("nested.toml", "[core]\nenv = { A = [1] }\n"),
+            ("type.toml", "[core]\nenv = \"A=1\"\n"),
+            ("name.toml", "[[process]]\nkey=\"a\"\ncmd=\"x\"\nenv = [\"=1\"]\n"),
+            ("missing.toml", "[[process]]\nkey=\"a\"\ncmd=\"x\"\nenvfile = \"nope.env\"\n"),
+        ] {
+            assert!(load(&write(dir.path(), name, body)).is_err(), "{name} should be rejected");
+        }
     }
 
     #[test]

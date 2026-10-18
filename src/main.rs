@@ -50,7 +50,11 @@ async fn daemon(cfg: config::Config, args: RunArgs) -> Result<()> {
         &format!("procd {} starting (config={}, readonly={})", env!("CARGO_PKG_VERSION"), args.config.display(), args.readonly),
     );
     if let Some(envfile) = &cfg.core.envfile {
-        console.line("core", &format!("envfile loaded: {} ({} vars)", envfile.display(), cfg.core.env_vars.len()));
+        console.line("core", &format!("envfile loaded: {}", envfile.display()));
+    }
+    let global_vars: std::collections::HashSet<_> = cfg.core.env_vars.iter().map(|(k, _)| k).collect();
+    if !global_vars.is_empty() {
+        console.line("core", &format!("global env: {} vars", global_vars.len()));
     }
 
     let manager = Manager::new(&cfg, Arc::clone(&console))?;

@@ -192,6 +192,7 @@ liegt in [`process.toml`](process.toml).
 | `shutdown_timeout` | Dauer | `10s` | Wartezeit nach SIGTERM an einen Prozess, bevor SIGKILL folgt. Gilt für `stop` und für das Herunterfahren von procd. |
 | `metrics_interval` | Dauer | `2s` | Sampling-Intervall für RAM/CPU |
 | `envfile` | string | – | `.env`-Datei (`KEY=VALUE` pro Zeile, `#`-Kommentare, optionale Anführungszeichen), deren Variablen **alle** Prozesse und Hooks erhalten. Fehlt die Datei oder ist eine Zeile ungültig, bricht der Start ab. |
+| `env` | Tabelle oder string-Array | – | Variablen für **alle** Prozesse und Hooks, direkt in der Config (siehe [Umgebung](#umgebung)). Überschreiben `envfile`. |
 | `logfile` | string | – | Gemeinsames Crash-Log: eine Zeile pro Absturz über alle Prozesse, mit Zeitstempel, Key, Exit-Code, Signal und `cmd` |
 | `failed_hook` | string | – | Kommando, das bei jedem Absturz läuft (siehe [Crash-Hook](#crash-hook)) |
 | `failed_hook_timeout` | Dauer | `30s` | Maximale Laufzeit eines Hooks; danach wird seine Prozessgruppe per SIGKILL beendet |
@@ -205,7 +206,8 @@ Ein Block pro Prozess, beliebig viele.
 | `key` | string | *erforderlich* | Eindeutiger Name, für CLI, API und Log-Prefix |
 | `cmd` | string | *erforderlich* | Wird als `sh -c "<cmd>"` in einer eigenen Prozessgruppe ausgeführt. Signale gehen an die ganze Gruppe. Mit `exec` (`cmd = "exec my-server --flag"`) ersetzt das Programm die Shell; dann beziehen sich PID und Metriken auf das Programm selbst. |
 | `workdir` | string | cwd von procd | Arbeitsverzeichnis |
-| `env` | string-Array | – | Zusätzliche Variablen (`"KEY=VALUE"`). Sie überschreiben die geerbte Umgebung und `core.envfile`. |
+| `envfile` | string | – | `.env`-Datei nur für diesen Prozess (Format wie `core.envfile`). Überschreibt die globalen Variablen. |
+| `env` | Tabelle oder string-Array | – | Variablen nur für diesen Prozess. Überschreiben alles andere (siehe [Umgebung](#umgebung)). |
 | `readonly` | bool | `false` | Verhindert **nur das Stoppen** über CLI/API. Start bleibt erlaubt; beim Herunterfahren von procd wird der Prozess trotzdem gestoppt. |
 | `autostart` | bool | `true` | Beim Hochfahren starten |
 | `stdout` | bool | `true` | stdout/stderr mit Prefix auf die Konsole (→ `docker logs`) spiegeln |
@@ -217,6 +219,41 @@ Ein Block pro Prozess, beliebig viele.
 | `failed_hook` | string | erbt `core.failed_hook` | Eigener Hook für diesen Prozess; `""` schaltet ihn ab |
 | `schedule` | string | – | Zeitplan als Cron-Ausdruck (siehe [Zeitplan](#zeitplan)) |
 | `schedule_action` | string | `"start"` | Was zum Zeitpunkt passiert: `"start"` oder `"restart"`. Nur zusammen mit `schedule` erlaubt. |
+
+### Umgebung
+
+Jeder Prozess (und sein Crash-Hook) bekommt die Umgebung, mit der procd
+selbst gestartet wurde, plus Variablen aus bis zu vier Quellen. Spätere
+Quellen gewinnen:
+
+1. `core.envfile`: Datei für alle Prozesse
+2. `core.env`: Variablen für alle Prozesse
+3. `envfile` des Prozesses
+4. `env` des Prozesses
+
+`env` kann als Tabelle oder als Array von `"KEY=VALUE"`-Strings geschrieben
+werden. Zahlen und Booleans in einer Tabelle werden als Text übergeben.
+
+```toml
+[core]
+envfile = ".env"                              # z.B. Secrets, nicht im Image
+env = { APP_ENV = "production", TZ = "Europe/Berlin" }
+
+[[process]]
+key = "worker"
+cmd = "exec /usr/local/bin/worker"
+envfile = "worker.env"
+env = { QUEUE = "default", CONCURRENCY = 4 }
+
+[[process]]
+key = "web"
+cmd = "exec /usr/local/bin/web-server"
+env = ["PORT=8080", "APP_ENV=staging"]        # überschreibt core.env nur für web
+```
+
+Variablen eines Prozesses sind für andere Prozesse nicht sichtbar. Relative
+`envfile`-Pfade werden relativ zur `process.toml` aufgelöst; fehlt die Datei,
+bricht der Start ab.
 
 ### Zustände
 

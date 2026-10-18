@@ -189,6 +189,7 @@ directory. A commented example is in [`process.toml`](process.toml).
 | `shutdown_timeout` | duration | `10s` | How long to wait after sending SIGTERM to a process before SIGKILL follows. Applies to `stop` and to procd shutting down. |
 | `metrics_interval` | duration | `2s` | Sampling interval for memory/CPU |
 | `envfile` | string | – | `.env` file (`KEY=VALUE` per line, `#` comments, optional quotes) whose variables are passed to **all** processes and hooks. If the file is missing or a line is invalid, startup aborts. |
+| `env` | table or string array | – | Variables for **all** processes and hooks, directly in the config (see [Environment](#environment)). Override `envfile`. |
 | `logfile` | string | – | Shared crash log: one line per crash across all processes, with timestamp, key, exit code, signal and `cmd` |
 | `failed_hook` | string | – | Command run on every crash (see [Crash hook](#crash-hook)) |
 | `failed_hook_timeout` | duration | `30s` | Maximum runtime of a hook; after that its process group is killed with SIGKILL |
@@ -202,7 +203,8 @@ One block per process, as many as needed.
 | `key` | string | *required* | Unique name, used by the CLI, the API and as log prefix |
 | `cmd` | string | *required* | Run as `sh -c "<cmd>"` in its own process group. Signals go to the whole group. With `exec` (`cmd = "exec my-server --flag"`) the program replaces the shell; PID and metrics then refer to the program itself. |
 | `workdir` | string | procd's cwd | Working directory |
-| `env` | string array | – | Additional variables (`"KEY=VALUE"`). They override the inherited environment and `core.envfile`. |
+| `envfile` | string | – | `.env` file just for this process (same format as `core.envfile`). Overrides the global variables. |
+| `env` | table or string array | – | Variables just for this process. Override everything else (see [Environment](#environment)). |
 | `readonly` | bool | `false` | Prevents **only stopping** via CLI/API. Starting is still allowed; when procd shuts down, the process is stopped anyway. |
 | `autostart` | bool | `true` | Start on boot |
 | `stdout` | bool | `true` | Mirror stdout/stderr with a prefix to the console (→ `docker logs`) |
@@ -214,6 +216,40 @@ One block per process, as many as needed.
 | `failed_hook` | string | inherits `core.failed_hook` | Own hook for this process; `""` disables it |
 | `schedule` | string | – | Schedule as a cron expression (see [Schedules](#schedules)) |
 | `schedule_action` | string | `"start"` | What happens when the schedule fires: `"start"` or `"restart"`. Only allowed together with `schedule`. |
+
+### Environment
+
+Each process (and its crash hook) gets the environment procd itself was
+started with, plus variables from up to four sources. Later sources win:
+
+1. `core.envfile`: file for all processes
+2. `core.env`: variables for all processes
+3. `envfile` of the process
+4. `env` of the process
+
+`env` can be written as a table or as an array of `"KEY=VALUE"` strings.
+Numbers and booleans in a table are passed on as text.
+
+```toml
+[core]
+envfile = ".env"                              # e.g. secrets, not in the image
+env = { APP_ENV = "production", TZ = "Europe/Berlin" }
+
+[[process]]
+key = "worker"
+cmd = "exec /usr/local/bin/worker"
+envfile = "worker.env"
+env = { QUEUE = "default", CONCURRENCY = 4 }
+
+[[process]]
+key = "web"
+cmd = "exec /usr/local/bin/web-server"
+env = ["PORT=8080", "APP_ENV=staging"]        # overrides core.env for web only
+```
+
+Variables of one process are not visible to other processes. Relative
+`envfile` paths are resolved against `process.toml`; a missing file aborts
+startup.
 
 ### States
 

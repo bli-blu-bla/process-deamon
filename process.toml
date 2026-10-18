@@ -18,8 +18,14 @@ shutdown_timeout = "10s"
 metrics_interval = "2s"
 
 # Optional: .env-Datei (KEY=VALUE pro Zeile), deren Variablen ALLE Prozesse
-# erhalten. Das env-Feld eines Prozesses überschreibt gleichnamige Keys.
+# und Hooks erhalten.
 # envfile = ".env"
+
+# Optional: Variablen für ALLE Prozesse und Hooks, direkt in der Config.
+# Überschreiben envfile. Als Tabelle oder als ["KEY=VALUE", ...].
+# Rangfolge (spätere gewinnen): core.envfile, core.env, envfile und env des
+# Prozesses.
+# env = { APP_ENV = "production", TZ = "Europe/Berlin" }
 
 # Optional: gemeinsames Crash-Log, eine Zeile pro Absturz über alle Prozesse.
 # logfile = "/var/log/procd/crashes.log"
@@ -38,8 +44,10 @@ key = "web"
 cmd = "exec /usr/local/bin/web-server --port 8080"
 # Optional: Arbeitsverzeichnis. Default: cwd von procd.
 # workdir = "/app"
-# Optional: zusätzliche Umgebungsvariablen.
-# env = ["APP_ENV=production"]
+# Optional: .env-Datei nur für diesen Prozess; überschreibt die globalen Variablen.
+# envfile = "web.env"
+# Optional: Variablen nur für diesen Prozess; überschreiben alles andere.
+# env = { PORT = 8080 }
 
 # Verhindert das Stoppen über die API (Start bleibt erlaubt). Default: false
 readonly = true
